@@ -1,0 +1,3 @@
+Download script
+
+1. pip install yt-dlp ffmpeg-python tqdm
