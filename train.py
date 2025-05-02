@@ -1,85 +1,99 @@
-import os
-import cv2
-import numpy as np
-import tensorflow as tf
 import kagglehub
-import string
+import os
+import tensorflow as tf
+import numpy as np
+import mediapipe as mp
+import cv2
+from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout
-from sklearn.model_selection import train_test_split
 from tensorflow.keras.utils import to_categorical
-import mediapipe as mp
+from tensorflow.keras.callbacks import EarlyStopping
+from collections import Counter
 
+# Download dataset
 path = kagglehub.dataset_download("esfiam/american-sign-language-dataset")
-
 train_path = os.path.join(path, "ASL_Gestures_36_Classes/train")
-test_path = os.path.join(path, "ASL_Gestures_36_Classes/test")
-print("Train path:", train_path)
-print("Test path:", test_path)
 
-label_mapping = {str(i): i for i in range(10)}
-label_mapping.update({letter: 10 + i for i, letter in enumerate(string.ascii_lowercase)})
-
+# Mediapipe setup
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(static_image_mode=True, max_num_hands=1, min_detection_confidence=0.7)
+mp_drawing = mp.solutions.drawing_utils
+hands = mp_hands.Hands(static_image_mode=True, max_num_hands=1)
 
-# Function to extract hand landmarks
+# Label mapping (0-9 + a-z)
+label_mapping = {str(i): i for i in range(10)}
+label_mapping.update({chr(97+i): 10+i for i in range(26)})
+
+# Function to extract landmarks
 def extract_landmarks(image):
-    img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    results = hands.process(img_rgb)
-    if results.multi_hand_landmarks:
-        for hand_landmarks in results.multi_hand_landmarks:
-            landmarks = []
-            for lm in hand_landmarks.landmark:
-                landmarks.extend([lm.x, lm.y, lm.z])
-            return landmarks
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    result = hands.process(image_rgb)
+    if result.multi_hand_landmarks:
+        hand_landmarks = result.multi_hand_landmarks[0]
+        landmarks = np.array([[lm.x, lm.y, lm.z] for lm in hand_landmarks.landmark]).flatten()
+        return landmarks
     return None
 
-def prepare_data(folder_path):
-    data = []
-    labels = []
-    for label in os.listdir(folder_path):
-        label_dir = os.path.join(folder_path, label)
-        if not os.path.isdir(label_dir):
+# Prepare data with optional mirroring
+def prepare_data(data_path):
+    X, y = [], []
+    for label in os.listdir(data_path):
+        label_dir = os.path.join(data_path, label)
+        if label not in label_mapping:
+            print(f"Skipping unknown label: {label}")
             continue
-        label_key = label.strip().lower()
-        if label_key not in label_mapping:
-            print(f"Warning: label '{label}' not found in label mapping")
-            continue
-        mapped_label = label_mapping[label_key]
-
-        for img_file in os.listdir(label_dir):
-            img_path = os.path.join(label_dir, img_file)
-            img = cv2.imread(img_path)
-            if img is None:
+        numeric_label = label_mapping[label]
+        samples_collected = 0
+        for fname in os.listdir(label_dir):
+            img_path = os.path.join(label_dir, fname)
+            image = cv2.imread(img_path)
+            if image is None:
                 continue
-            landmarks = extract_landmarks(img)
-            if landmarks:
-                data.append(landmarks)
-                labels.append(mapped_label)
+            landmarks = extract_landmarks(image)
+            if landmarks is not None:
+                X.append(landmarks)
+                y.append(numeric_label)
+                samples_collected += 1
+                mirrored = image[:, ::-1]  # flip horizontally
+                mirrored_landmarks = extract_landmarks(mirrored)
+                if mirrored_landmarks is not None:
+                    X.append(mirrored_landmarks)
+                    y.append(numeric_label)
+                    samples_collected += 1
+        if samples_collected < 2:
+            print(f"Warning: Not enough samples for label '{label}' ({samples_collected})")
+    return np.array(X), to_categorical(y, num_classes=36), y  # include raw y for stratification
 
-    return np.array(data), np.array(labels)
+# Load and preprocess
+X, y_cat, y_raw = prepare_data(train_path)
+print(f"Loaded {len(X)} samples.")
 
-X_train, y_train = prepare_data(train_path)
-X_test, y_test = prepare_data(test_path)
+# Filter labels with less than 2 instances to avoid stratify error
+label_counts = Counter(y_raw)
+valid_indices = [i for i, label in enumerate(y_raw) if label_counts[label] > 1]
+X = X[valid_indices]
+y_cat = y_cat[valid_indices]
+y_raw = [y_raw[i] for i in valid_indices]
 
-num_classes = 36
-y_train = to_categorical(y_train, num_classes=num_classes)
-y_test = to_categorical(y_test, num_classes=num_classes)
+# Split
+X_train, X_test, y_train, y_test = train_test_split(X, y_cat, test_size=0.2, stratify=y_raw, random_state=42)
 
-X_train = np.array(X_train)
-X_test = np.array(X_test)
-
+# Build model
 model = Sequential([
-    Dense(128, activation='relu', input_shape=(len(X_train[0]),)),
+    Dense(256, activation='relu', input_shape=(X.shape[1],)),
+    Dropout(0.5),
+    Dense(128, activation='relu'),
     Dropout(0.3),
-    Dense(64, activation='relu'),
-    Dropout(0.3),
-    Dense(num_classes, activation='softmax')
+    Dense(36, activation='softmax')
 ])
 
 model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
-model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=10, batch_size=32)
+# Early stopping
+early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
-model.save('mediapipe_asl_model.h5')
+# Train
+model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=50, batch_size=32, callbacks=[early_stop])
+
+# Save
+model.save('asl_gesture_model_mediapipe.h5')
