@@ -3,10 +3,8 @@ import numpy as np
 import tensorflow as tf
 import mediapipe as mp
 
-# Load trained model
 model = tf.keras.models.load_model('asl_gesture_model_mediapipe.h5')
 
-# Same label mapping as in train.py
 label_mapping = {str(i): i for i in range(10)}
 counter = 10
 for i in range(26):
@@ -15,15 +13,12 @@ for i in range(26):
         label_mapping[ch] = counter
         counter += 1
 
-# Invert label mapping to get labels by class index
 inv_label_mapping = {v: k.upper() for k, v in label_mapping.items()}
 
-# Mediapipe setup
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.7)
 mp_drawing = mp.solutions.drawing_utils
 
-# Start webcam
 cap = cv2.VideoCapture(0)
 
 def extract_landmarks_from_frame(frame):
@@ -49,11 +44,9 @@ while True:
         confidence = np.max(pred)
         label = inv_label_mapping.get(class_id, "?")
 
-        # Display prediction
         cv2.putText(frame, f"{label} ({confidence*100:.1f}%)", (10, 50),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3)
 
-        # Draw hand landmarks
         mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
     cv2.imshow("ASL Gesture Recognition", frame)

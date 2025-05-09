@@ -12,11 +12,9 @@ from tensorflow.keras.callbacks import EarlyStopping
 from collections import Counter
 from tensorflow.keras.layers import BatchNormalization
 
-# Download dataset
 path = kagglehub.dataset_download("esfiam/american-sign-language-dataset")
 train_path = os.path.join(path, "ASL_Gestures_36_Classes/train")
 
-# Label mapping (0-9 + a-z)
 label_mapping = {str(i): i for i in range(10)}
 counter = 10
 for i in range(26):
@@ -27,13 +25,10 @@ for i in range(26):
 
 num_classes = len(label_mapping.keys())
 
-# Mediapipe setup
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 hands = mp_hands.Hands(static_image_mode=True, max_num_hands=1)
 
-
-# Function to extract landmarks
 def extract_landmarks(image):
     image = cv2.resize(image, (224, 224))
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -52,7 +47,6 @@ def augment_landmarks(landmarks):
     augmented.append(mirrored)
     return augmented
 
-# Prepare data with optional mirroring
 def prepare_data(data_path):
     X, y = [], []
     for label in os.listdir(data_path):
@@ -86,17 +80,9 @@ def prepare_data(data_path):
             print(f"Warning: Not enough samples for label '{label}' ({samples_collected})")
     return np.array(X), to_categorical(y, num_classes), y  # include raw y for stratification
 
-# Load and preprocess
 X, y_cat, y_raw = prepare_data(train_path)
 print(f"Loaded {len(X)} samples.")
 
-# Filter labels with less than 2 instances to avoid stratify error
-label_counts = Counter(y_raw)
-print(f"This is label counts: {label_counts}")
-valid_indices = [i for i, label in enumerate(y_raw) if label_counts[label] > 1]
-X = X[valid_indices]
-y_cat = y_cat[valid_indices]
-y_raw = [y_raw[i] for i in valid_indices]
 
 # Split
 X_train, X_test, y_train, y_test = train_test_split(X, y_cat, test_size=0.2, stratify=y_raw, random_state=42)
@@ -113,15 +99,12 @@ X_train, X_test, y_train, y_test = train_test_split(X, y_cat, test_size=0.2, str
 
 model = Sequential([
     Dense(512, activation='relu', input_shape=(X.shape[1],)),
-    BatchNormalization(),
     Dropout(0.5),
 
     Dense(256, activation='relu'),
-    BatchNormalization(),
     Dropout(0.3),
 
     Dense(128, activation='relu'),
-    BatchNormalization(),
     Dropout(0.2),
 
     Dense(num_classes, activation='softmax')
@@ -130,11 +113,8 @@ model = Sequential([
 
 model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
-# Early stopping
 early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
-# Train
 model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=50, batch_size=32, callbacks=[early_stop])
 
-# Save
 model.save('asl_gesture_model_mediapipe.h5')
