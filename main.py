@@ -6,8 +6,17 @@ import mediapipe as mp
 # Load trained model
 model = tf.keras.models.load_model('asl_gesture_model_mediapipe.h5')
 
-# Label mapping (0-9 + A-Z)
-LABELS = list("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+# Same label mapping as in train.py
+label_mapping = {str(i): i for i in range(10)}
+counter = 10
+for i in range(26):
+    ch = chr(97 + i)
+    if ch not in ['j', 'z']:
+        label_mapping[ch] = counter
+        counter += 1
+
+# Invert label mapping to get labels by class index
+inv_label_mapping = {v: k.upper() for k, v in label_mapping.items()}
 
 # Mediapipe setup
 mp_hands = mp.solutions.hands
@@ -34,15 +43,13 @@ while True:
     landmarks, hand_landmarks = extract_landmarks_from_frame(frame)
 
     if landmarks is not None:
-        # Predict using landmarks
         input_data = landmarks.reshape(1, -1)
-        pred = model.predict(input_data)
+        pred = model.predict(input_data, verbose=0)
         class_id = np.argmax(pred)
         confidence = np.max(pred)
-        label = LABELS[class_id]
+        label = inv_label_mapping.get(class_id, "?")
 
-        # Draw prediction
-        h, w, _ = frame.shape
+        # Display prediction
         cv2.putText(frame, f"{label} ({confidence*100:.1f}%)", (10, 50),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3)
 
