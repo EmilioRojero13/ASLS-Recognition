@@ -1,77 +1,106 @@
 import kagglehub
 import os
-import tensorflow as tf
-import matplotlib.pyplot as plt
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
-from PIL import Image
 import cv2
 import numpy as np
+from sklearn.utils import shuffle
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.callbacks import EarlyStopping
 
-# Download the dataset from Kaggle
+# Download dataset
 path = kagglehub.dataset_download("esfiam/american-sign-language-dataset")
-
-# File paths (image folders)
 train_path = os.path.join(path, "ASL_Gestures_36_Classes/train")
 test_path = os.path.join(path, "ASL_Gestures_36_Classes/test")
-print("Train path:", train_path)
-print("Test path:", test_path)
 
 # Parameters
-img_size = (28, 28)  # Resize all images to 28x28
-batch_size = 32
-num_classes = 36
+img_height, img_width = 28, 28
+excluded_labels = {'j', 'z'}
 
-# Load image datasets from folders
-train_ds = tf.keras.utils.image_dataset_from_directory(
-    train_path,
-    image_size=img_size,
-    batch_size=batch_size,
-    label_mode='categorical',
-    shuffle=True
-)
+def load_data_recursive(data_path):
+    images = []
+    labels = []
 
-test_ds = tf.keras.utils.image_dataset_from_directory(
-    test_path,
-    image_size=img_size,
-    batch_size=batch_size,
-    label_mode='categorical',
-    shuffle=False
-)
+    for root, dirs, files in os.walk(data_path):
+        label = os.path.basename(root)
+        if label in excluded_labels:
+            continue
 
-# Normalize images
-normalization_layer = tf.keras.layers.Rescaling(1./255)
-train_ds = train_ds.map(lambda x, y: (normalization_layer(x), y))
-test_ds = test_ds.map(lambda x, y: (normalization_layer(x), y))
+        for file in files:
+            if file.lower().endswith(('.png', '.jpg', '.jpeg')):
+                img_path = os.path.join(root, file)
+                img = cv2.imread(img_path)
+                if img is None:
+                    continue  # skip unreadable images
+                img = cv2.resize(img, (img_width, img_height))
+                images.append(img)
+                labels.append(label)
 
-# Build CNN model
+    return np.array(images, dtype='float32') / 255.0, np.array(labels)
+
+# Load and preprocess data
+x_train, y_train_raw = load_data_recursive(train_path)
+x_test, y_test_raw = load_data_recursive(test_path)
+
+# Create label map excluding 'j' and 'z'
+all_labels = sorted(set(y_train_raw) | set(y_test_raw) - excluded_labels)
+label_to_index = {label: idx for idx, label in enumerate(all_labels)}
+num_classes = len(label_to_index)
+
+# Encode labels
+y_train = np.array([label_to_index[label] for label in y_train_raw])
+y_test = np.array([label_to_index[label] for label in y_test_raw])
+y_train_cat = to_categorical(y_train, num_classes)
+y_test_cat = to_categorical(y_test, num_classes)
+
+# Shuffle training data
+x_train, y_train_cat = shuffle(x_train, y_train_cat, random_state=42)
+
+# CNN Model
 model = Sequential([
-    Conv2D(32, (3, 3), activation='relu', input_shape=(28, 28, 3)),
-    MaxPooling2D(2, 2),
+    Conv2D(64, (3, 3), activation='relu', input_shape=(img_height, img_width, 3)),
+    MaxPooling2D((2, 2)),
+    
     Conv2D(64, (3, 3), activation='relu'),
-    MaxPooling2D(2, 2),
+    MaxPooling2D((2, 2)),
+    Dropout(0.2),
+    
+    Conv2D(64, (3, 3), activation='relu'),
+    MaxPooling2D((2, 2)),
+    Dropout(0.2),
+
     Flatten(),
     Dense(128, activation='relu'),
-    Dropout(0.5),
+    Dropout(0.2),
     Dense(num_classes, activation='softmax')
 ])
 
-# Compile the model
-model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+# Compile model
+model.compile(
+    optimizer='adam',
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
 
-# Train the model
-model.fit(train_ds, validation_data=test_ds, epochs=10)
+# Early stopping
+early_stop = EarlyStopping(
+    monitor='val_loss',
+    patience=5,
+    restore_best_weights=True
+)
 
-# Evaluate the model
-model.evaluate(test_ds)
+# Train model
+epochs = 50
+batch_size = 128
 
-# Display and improve visualization of the first image in the training set
-for images, labels in train_ds.take(1):
-    first_image = images[0].numpy().squeeze()
-    first_label = labels[0].numpy()
-
-    print("Shape of first image:", first_image.shape)
-    print("One-hot label of first image:", first_label)
+history = model.fit(
+    x_train, y_train_cat,
+    validation_data=(x_test, y_test_cat),
+    epochs=epochs,
+    batch_size=batch_size,
+    callbacks=[early_stop]
+)
 
 # Save the trained model
-model.save('asl_gesture_model.h5')
+model.save("asl-cnn-model.h5")
