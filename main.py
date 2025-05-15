@@ -4,7 +4,7 @@ import time
 from tensorflow.keras.models import load_model
 
 # Load trained model
-model = load_model("test.h5")
+model = load_model("model.h5")
 
 
 # Your label map (exclude j and z)

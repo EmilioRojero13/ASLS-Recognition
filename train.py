@@ -116,7 +116,7 @@ def main():
     )
 
     print("Saving model to asl-cnn-model.h5...")
-    model.save("test.h5")
+    model.save("model.h5")
     print("Done.")
 
 if __name__ == "__main__":
