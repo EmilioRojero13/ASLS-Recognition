@@ -4,7 +4,7 @@ import time
 from tensorflow.keras.models import load_model
 
 # Load trained model
-model = load_model("asl-cnn-model.h5")
+model = load_model("test.h5")
 
 
 # Your label map (exclude j and z)
@@ -17,7 +17,7 @@ label_map = [
 
 # Parameters
 img_size = 28
-frame_interval = 30  # Analyze 1 frame every X frames
+frame_interval = 10  # Analyze 1 frame every X frames
 frame_counter = 0
 
 def remove_background(frame):
